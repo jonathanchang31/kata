@@ -44,21 +44,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    frontier = subparsers.add_parser(
-        "frontier",
-        help="Manage king/frontier agent state for competition.",
+    king = subparsers.add_parser(
+        "king",
+        help="Manage the current king agent for a lane.",
     )
-    frontier_subparsers = frontier.add_subparsers(dest="frontier_command", required=True)
+    king_subparsers = king.add_subparsers(dest="king_command", required=True)
 
-    frontier_promote = frontier_subparsers.add_parser(
-        "promote", help="Promote a successful challenger agent into the frontier."
+    king_promote = king_subparsers.add_parser(
+        "promote", help="Promote a verified winning candidate into the lane king."
     )
-    frontier_promote.add_argument(
+    king_promote.add_argument(
         "--challenge-run",
         required=True,
         help="Path to a challenge_summary.json file produced by `kata challenge`.",
     )
-    frontier_promote.add_argument(
+    king_promote.add_argument(
         "--submission-path",
         default=None,
         help=(
@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Defaults to the candidate artifact recorded in the challenge summary."
         ),
     )
-    frontier_promote.add_argument(
+    king_promote.add_argument(
         "--public-root",
         default=None,
         help=(
@@ -74,8 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
             "under `kings/<repo-pack>/<mode>/`. Defaults to the current working directory."
         ),
     )
-    frontier_promote.add_argument("--json", action="store_true")
-    frontier_promote.set_defaults(handler=handle_frontier_promote)
+    king_promote.add_argument("--json", action="store_true")
+    king_promote.set_defaults(handler=handle_king_promote)
 
     lane = subparsers.add_parser(
         "lane",
@@ -244,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     submission_evaluate = submission_subparsers.add_parser(
         "evaluate",
-        help="Run a validated submission against the current frontier.",
+        help="Run a validated submission against the current lane king.",
     )
     submission_evaluate.add_argument(
         "--path",
@@ -339,7 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
-def handle_frontier_promote(args: argparse.Namespace) -> int:
+def handle_king_promote(args: argparse.Namespace) -> int:
     summary = load_challenge_summary(args.challenge_run)
     public_root = (
         Path(args.public_root).expanduser().resolve()

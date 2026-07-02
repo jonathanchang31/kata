@@ -20,7 +20,7 @@ class PublicKingMetadata:
     mode: str
     submission_id: str
     challenge_run_id: str
-    frontier_artifact_hash: str
+    king_artifact_hash: str
     candidate_artifact_hash: str
 
 
@@ -73,7 +73,7 @@ def publish_public_king(
     submission_id: str,
     challenge_run_id: str,
     candidate_artifact_path: str,
-    frontier_artifact_hash: str,
+    king_artifact_hash: str,
     candidate_artifact_hash: str,
 ) -> Path:
     king_root = mirror_public_king_artifact(
@@ -87,7 +87,7 @@ def publish_public_king(
         mode=mode,
         submission_id=submission_id,
         challenge_run_id=challenge_run_id,
-        frontier_artifact_hash=frontier_artifact_hash,
+        king_artifact_hash=king_artifact_hash,
         candidate_artifact_hash=candidate_artifact_hash,
     )
     (king_root / KING_METADATA_FILENAME).write_text(

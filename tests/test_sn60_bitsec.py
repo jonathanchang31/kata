@@ -46,12 +46,12 @@ def write_sandbox_source(root: Path) -> Path:
 def test_run_sn60_bitsec_duel_stages_full_bundle_and_persists_outputs(tmp_path: Path) -> None:
     sandbox_root = tmp_path / "sandbox"
     benchmark_path = write_sandbox_source(sandbox_root)
-    frontier_root = tmp_path / "frontier"
+    king_root = tmp_path / "king"
     candidate_root = tmp_path / "candidate"
     write_bundle(
-        frontier_root,
+        king_root,
         agent_source="def agent_main():\n    return {'vulnerabilities': []}\n",
-        helper_source="VALUE = 'frontier-helper'\n",
+        helper_source="VALUE = 'king-helper'\n",
     )
     write_bundle(
         candidate_root,
@@ -110,7 +110,7 @@ def test_run_sn60_bitsec_duel_stages_full_bundle_and_persists_outputs(tmp_path: 
         }
 
     summary = run_sn60_bitsec_duel(
-        frontier_artifact_path=str(frontier_root),
+        king_artifact_path=str(king_root),
         candidate_artifact_path=str(candidate_root),
         project_keys=["project-alpha", "project-beta"],
         output_root=str(tmp_path / "runs"),
@@ -124,16 +124,16 @@ def test_run_sn60_bitsec_duel_stages_full_bundle_and_persists_outputs(tmp_path: 
 
     assert summary.sandbox_source.sandbox_commit == "sandbox-commit-123"
     assert summary.sandbox_source.benchmark_file == str(benchmark_path.resolve())
-    assert summary.frontier.invalid_runs == 1
+    assert summary.king.invalid_runs == 1
     assert summary.candidate.invalid_runs == 1
-    assert summary.frontier.average_detection_rate == 0.1875
+    assert summary.king.average_detection_rate == 0.1875
     assert summary.candidate.average_detection_rate == 0.75
     assert summary.candidate.pass_count == 3
     # candidate passes project-alpha (2/2 runs) but not project-beta (1 pass, 1 invalid)
     assert summary.candidate.codebase_pass_count == 1
     assert summary.candidate.aggregated_score == 0.5
-    assert summary.frontier.codebase_pass_count == 0
-    assert summary.frontier.aggregated_score == 0.0
+    assert summary.king.codebase_pass_count == 0
+    assert summary.king.aggregated_score == 0.0
     candidate_projects = {
         project.project_key: project.passed for project in summary.candidate.project_summaries
     }
@@ -147,11 +147,11 @@ def test_run_sn60_bitsec_duel_stages_full_bundle_and_persists_outputs(tmp_path: 
     assert persisted["candidate"]["project_summaries"][0]["project_key"] == "project-alpha"
 
     candidate_helper = staged_helpers[("candidate", "project-alpha", 1)]
-    frontier_helper = staged_helpers[("frontier", "project-alpha", 1)]
+    king_helper = staged_helpers[("king", "project-alpha", 1)]
     assert "candidate-helper" in candidate_helper
-    assert "frontier-helper" in frontier_helper
+    assert "king-helper" in king_helper
 
-    for variant_name in ("frontier", "candidate"):
+    for variant_name in ("king", "candidate"):
         report_path = (
             Path(summary.output_root)
             / variant_name

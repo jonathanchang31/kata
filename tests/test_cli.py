@@ -15,7 +15,7 @@ def test_top_level_cli_exposes_agent_competition_commands() -> None:
     )
     commands = set(subparser_action.choices)
 
-    assert {"frontier", "submission", "lane"} == commands
+    assert {"king", "submission", "lane"} == commands
 
 
 def test_lane_cli_registers_and_lists_packs(tmp_path: Path, capsys) -> None:

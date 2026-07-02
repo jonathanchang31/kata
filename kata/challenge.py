@@ -47,13 +47,13 @@ SN60_VALIDATOR_MODEL = "sn60-bitsec-sandbox"
 
 @dataclass(frozen=True)
 class ChallengePoolSummary:
-    task_ids: list[str]
-    eval_run_summary: str
+    project_keys: list[str]
+    run_summary_path: str
     total_task_weight: float
     variant_successes: dict[str, int]
-    variant_invalid_tasks: dict[str, int]
+    variant_invalid_runs: dict[str, int]
     variant_scores: dict[str, float]
-    candidate_beats_frontier: bool
+    candidate_beats_king: bool
     candidate_score_delta: float
 
 
@@ -65,17 +65,13 @@ class ChallengeSummary:
     mode: str
     evaluator_version: str
     validator_model: str
-    frontier_artifact: str
+    king_artifact: str
     candidate_artifact: str
-    frontier_artifact_hash: str
+    king_artifact_hash: str
     candidate_artifact_hash: str
     primary_pool_fingerprint: str | None
-    holdout_pool_fingerprint: str | None
-    promotion_margin_points: float
-    holdout_promotion_margin_points: float
     created_at: str
     primary: ChallengePoolSummary
-    holdout: ChallengePoolSummary | None
     promotion_ready: bool
     promotion_reason: str
 
@@ -91,7 +87,7 @@ class Sn60PromotionDecision:
 
 def run_sn60_challenge(
     *,
-    frontier_artifact_path: str,
+    king_artifact_path: str,
     candidate_artifact_path: str,
     project_keys: list[str],
     candidate_submission_id: str,
@@ -148,7 +144,7 @@ def run_sn60_challenge(
             }
         )
         summary = build_sn60_screening_failure_summary(
-            frontier_artifact_path=frontier_artifact_path,
+            king_artifact_path=king_artifact_path,
             candidate_artifact_path=candidate_artifact_path,
             project_keys=project_keys,
             lane_id=lane_id,
@@ -161,7 +157,7 @@ def run_sn60_challenge(
         record_sn60_screening_failure_provenance(
             lane_id=lane_id,
             candidate_submission_id=candidate_submission_id,
-            frontier_artifact_path=frontier_artifact_path,
+            king_artifact_path=king_artifact_path,
             project_keys=project_keys,
             replicas_per_project=replicas_per_project,
             screening=screening,
@@ -180,7 +176,7 @@ def run_sn60_challenge(
         }
     )
     duel_summary = run_sn60_bitsec_duel(
-        frontier_artifact_path=frontier_artifact_path,
+        king_artifact_path=king_artifact_path,
         candidate_artifact_path=candidate_artifact_path,
         project_keys=project_keys,
         output_root=output_root,
@@ -226,34 +222,30 @@ def sn60_duel_to_challenge_summary(
     screening_result: dict[str, object] | None = None,
 ) -> ChallengeSummary:
     decision = evaluate_sn60_promotion(
-        frontier=duel_summary.frontier,
+        king=duel_summary.king,
         candidate=duel_summary.candidate,
         screening_result=screening_result,
     )
     freshness_fingerprint = sn60_freshness_fingerprint(duel_summary)
     duel_summary_path = Path(duel_summary.output_root) / "duel_summary.json"
     return ChallengeSummary(
-        schema_version=4,
+        schema_version=5,
         run_id=duel_summary.run_id,
         manifest_path=str(duel_summary_path),
         mode=SN60_MINER_MODE,
         evaluator_version=sn60_evaluator_version(duel_summary),
         validator_model=SN60_VALIDATOR_MODEL,
-        frontier_artifact=duel_summary.frontier.artifact_path,
+        king_artifact=duel_summary.king.artifact_path,
         candidate_artifact=duel_summary.candidate.artifact_path,
-        frontier_artifact_hash=duel_summary.frontier.artifact_hash,
+        king_artifact_hash=duel_summary.king.artifact_hash,
         candidate_artifact_hash=duel_summary.candidate.artifact_hash,
         primary_pool_fingerprint=freshness_fingerprint,
-        holdout_pool_fingerprint=None,
-        promotion_margin_points=0.0,
-        holdout_promotion_margin_points=0.0,
         created_at=duel_summary.created_at,
         primary=sn60_duel_to_pool_summary(
             duel_summary,
-            eval_run_summary=duel_summary_path,
+            run_summary_path=duel_summary_path,
             screening_result=screening_result,
         ),
-        holdout=None,
         promotion_ready=decision.promotion_ready,
         promotion_reason=f"{lane_id}: {decision.reason}",
     )
@@ -262,55 +254,55 @@ def sn60_duel_to_challenge_summary(
 def sn60_duel_to_pool_summary(
     duel_summary: Sn60DuelSummary,
     *,
-    eval_run_summary: Path,
+    run_summary_path: Path,
     screening_result: dict[str, object] | None = None,
 ) -> ChallengePoolSummary:
-    frontier_score = round(duel_summary.frontier.aggregated_score * 100, 2)
+    king_score = round(duel_summary.king.aggregated_score * 100, 2)
     candidate_score = round(duel_summary.candidate.aggregated_score * 100, 2)
     decision = evaluate_sn60_promotion(
-        frontier=duel_summary.frontier,
+        king=duel_summary.king,
         candidate=duel_summary.candidate,
         screening_result=screening_result,
     )
     return ChallengePoolSummary(
-        task_ids=list(duel_summary.project_keys),
-        eval_run_summary=str(eval_run_summary),
+        project_keys=list(duel_summary.project_keys),
+        run_summary_path=str(run_summary_path),
         total_task_weight=float(len(duel_summary.project_keys)),
         variant_successes={
-            "frontier": duel_summary.frontier.codebase_pass_count,
+            "king": duel_summary.king.codebase_pass_count,
             "candidate": duel_summary.candidate.codebase_pass_count,
         },
-        variant_invalid_tasks={
-            "frontier": duel_summary.frontier.invalid_runs,
+        variant_invalid_runs={
+            "king": duel_summary.king.invalid_runs,
             "candidate": duel_summary.candidate.invalid_runs,
         },
         variant_scores={
-            "frontier": frontier_score,
+            "king": king_score,
             "candidate": candidate_score,
         },
-        candidate_beats_frontier=decision.final_winner == "candidate",
-        candidate_score_delta=round(candidate_score - frontier_score, 2),
+        candidate_beats_king=decision.final_winner == "candidate",
+        candidate_score_delta=round(candidate_score - king_score, 2),
     )
 
 
 def build_sn60_screening_failure_summary(
     *,
-    frontier_artifact_path: str,
+    king_artifact_path: str,
     candidate_artifact_path: str,
     project_keys: list[str],
     lane_id: str,
     screening: Sn60ScreeningResult,
 ) -> ChallengeSummary:
-    frontier_root = Path(frontier_artifact_path).expanduser().resolve()
+    king_root = Path(king_artifact_path).expanduser().resolve()
     candidate_root = Path(candidate_artifact_path).expanduser().resolve()
-    frontier_hash = hash_bundle_root(frontier_root)
+    king_hash = hash_bundle_root(king_root)
     freshness_fingerprint = sn60_screening_freshness_fingerprint(
-        frontier_artifact_hash=frontier_hash,
+        king_artifact_hash=king_hash,
         screening_result=screening,
     )
     reason = "; ".join(screening.reasons) if screening.reasons else "unknown screening failure"
     return ChallengeSummary(
-        schema_version=4,
+        schema_version=5,
         run_id=screening.run_id,
         manifest_path=screening.result_path,
         mode=SN60_MINER_MODE,
@@ -319,26 +311,22 @@ def build_sn60_screening_failure_summary(
             f"@{short_hash(screening.sandbox_source.sandbox_commit)}"
         ),
         validator_model=SN60_VALIDATOR_MODEL,
-        frontier_artifact=str(frontier_root),
+        king_artifact=str(king_root),
         candidate_artifact=str(candidate_root),
-        frontier_artifact_hash=frontier_hash,
+        king_artifact_hash=king_hash,
         candidate_artifact_hash=screening.artifact_hash,
         primary_pool_fingerprint=freshness_fingerprint,
-        holdout_pool_fingerprint=None,
-        promotion_margin_points=0.0,
-        holdout_promotion_margin_points=0.0,
         created_at=screening.created_at,
         primary=ChallengePoolSummary(
-            task_ids=list(project_keys),
-            eval_run_summary=screening.result_path,
+            project_keys=list(project_keys),
+            run_summary_path=screening.result_path,
             total_task_weight=1.0,
-            variant_successes={"frontier": 0, "candidate": 0},
-            variant_invalid_tasks={"frontier": 0, "candidate": 1},
-            variant_scores={"frontier": 0.0, "candidate": 0.0},
-            candidate_beats_frontier=False,
+            variant_successes={"king": 0, "candidate": 0},
+            variant_invalid_runs={"king": 0, "candidate": 1},
+            variant_scores={"king": 0.0, "candidate": 0.0},
+            candidate_beats_king=False,
             candidate_score_delta=0.0,
         ),
-        holdout=None,
         promotion_ready=False,
         promotion_reason=f"{lane_id}: candidate failed SN60 screening: {reason}",
     )
@@ -346,7 +334,7 @@ def build_sn60_screening_failure_summary(
 
 def evaluate_sn60_promotion(
     *,
-    frontier: Sn60VariantSummary,
+    king: Sn60VariantSummary,
     candidate: Sn60VariantSummary,
     screening_result: dict[str, object] | None = None,
 ) -> Sn60PromotionDecision:
@@ -354,22 +342,22 @@ def evaluate_sn60_promotion(
     if screening_result is not None and screening_status not in {"passed", "pass", True}:
         return Sn60PromotionDecision(
             promotion_ready=False,
-            final_winner="frontier",
+            final_winner="king",
             reason="candidate failed SN60 screening",
         )
     if candidate.invalid_runs > 0:
         return Sn60PromotionDecision(
             promotion_ready=False,
-            final_winner="frontier",
+            final_winner="king",
             reason="candidate has invalid SN60 replica runs",
         )
 
     candidate_rank = sn60_variant_rank(candidate)
-    frontier_rank = sn60_variant_rank(frontier)
-    if candidate_rank <= frontier_rank:
+    king_rank = sn60_variant_rank(king)
+    if candidate_rank <= king_rank:
         return Sn60PromotionDecision(
             promotion_ready=False,
-            final_winner="frontier",
+            final_winner="king",
             reason="candidate did not beat the current SN60 king",
         )
     return Sn60PromotionDecision(
@@ -400,7 +388,7 @@ def record_sn60_lane_provenance(
     reward_label_applied: str | None = None,
 ) -> tuple[Path, Path]:
     decision = evaluate_sn60_promotion(
-        frontier=duel_summary.frontier,
+        king=duel_summary.king,
         candidate=duel_summary.candidate,
         screening_result=screening_result,
     )
@@ -417,7 +405,7 @@ def record_sn60_lane_provenance(
             schema_version=CHALLENGE_STATE_SCHEMA_VERSION,
             candidate_submission_id=candidate_submission_id,
             candidate_artifact_hash=duel_summary.candidate.artifact_hash,
-            king_artifact_hash=duel_summary.frontier.artifact_hash,
+            king_artifact_hash=duel_summary.king.artifact_hash,
             screening_result=screening_result,
             selected_project_keys=list(duel_summary.project_keys),
             validator_replica_count=duel_summary.replicas_per_project,
@@ -434,15 +422,15 @@ def record_sn60_lane_provenance(
             final_metrics=sn60_final_metrics(duel_summary, decision),
             local_replica_scores=sn60_local_replica_scores(duel_summary),
             pass_counts={
-                "frontier": duel_summary.frontier.codebase_pass_count,
+                "king": duel_summary.king.codebase_pass_count,
                 "candidate": duel_summary.candidate.codebase_pass_count,
             },
             true_positives={
-                "frontier": duel_summary.frontier.true_positives,
+                "king": duel_summary.king.true_positives,
                 "candidate": duel_summary.candidate.true_positives,
             },
             invalid_runs={
-                "frontier": duel_summary.frontier.invalid_runs,
+                "king": duel_summary.king.invalid_runs,
                 "candidate": duel_summary.candidate.invalid_runs,
             },
             final_winner=decision.final_winner,
@@ -458,15 +446,15 @@ def record_sn60_screening_failure_provenance(
     *,
     lane_id: str,
     candidate_submission_id: str,
-    frontier_artifact_path: str,
+    king_artifact_path: str,
     project_keys: list[str],
     replicas_per_project: int,
     screening: Sn60ScreeningResult,
     public_root: str | None = None,
 ) -> tuple[Path, Path]:
-    frontier_hash = hash_bundle_root(Path(frontier_artifact_path).expanduser().resolve())
+    king_hash = hash_bundle_root(Path(king_artifact_path).expanduser().resolve())
     freshness_fingerprint = sn60_screening_freshness_fingerprint(
-        frontier_artifact_hash=frontier_hash,
+        king_artifact_hash=king_hash,
         screening_result=screening,
     )
     screening_payload = screening_result_payload(screening)
@@ -483,7 +471,7 @@ def record_sn60_screening_failure_provenance(
             schema_version=CHALLENGE_STATE_SCHEMA_VERSION,
             candidate_submission_id=candidate_submission_id,
             candidate_artifact_hash=screening.artifact_hash,
-            king_artifact_hash=frontier_hash,
+            king_artifact_hash=king_hash,
             screening_result=screening_payload,
             selected_project_keys=list(project_keys),
             validator_replica_count=replicas_per_project,
@@ -507,11 +495,11 @@ def record_sn60_screening_failure_provenance(
                 "benchmark_sha256": screening.sandbox_source.benchmark_sha256,
                 "scorer_version": screening.sandbox_source.scorer_version,
             },
-            local_replica_scores={"frontier": [], "candidate": []},
-            pass_counts={"frontier": 0, "candidate": 0},
-            true_positives={"frontier": 0, "candidate": 0},
-            invalid_runs={"frontier": 0, "candidate": 1},
-            final_winner="frontier",
+            local_replica_scores={"king": [], "candidate": []},
+            pass_counts={"king": 0, "candidate": 0},
+            true_positives={"king": 0, "candidate": 0},
+            invalid_runs={"king": 0, "candidate": 1},
+            final_winner="king",
             reward_label_applied=None,
             recorded_at=datetime.now(UTC).isoformat(),
         ),
@@ -524,20 +512,15 @@ def sn60_final_metrics(
     duel_summary: Sn60DuelSummary,
     decision: Sn60PromotionDecision,
 ) -> dict[str, object]:
-    frontier_aggregated = duel_summary.frontier.aggregated_score
+    king_aggregated = duel_summary.king.aggregated_score
     candidate_aggregated = duel_summary.candidate.aggregated_score
     return {
         "run_id": duel_summary.run_id,
         "promotion_ready": decision.promotion_ready,
         "promotion_reason": decision.reason,
-        "frontier_aggregated_score": frontier_aggregated,
+        "king_aggregated_score": king_aggregated,
         "candidate_aggregated_score": candidate_aggregated,
-        "candidate_aggregated_score_delta": candidate_aggregated - frontier_aggregated,
-        # `average score` is defined as exactly equal to `aggregated score` per the
-        # SN60 metric naming rule; kept for existing dashboard consumers.
-        "frontier_average_score": frontier_aggregated,
-        "candidate_average_score": candidate_aggregated,
-        "candidate_score_delta": candidate_aggregated - frontier_aggregated,
+        "candidate_aggregated_score_delta": candidate_aggregated - king_aggregated,
         "sandbox_commit": duel_summary.sandbox_source.sandbox_commit,
         "benchmark_sha256": duel_summary.sandbox_source.benchmark_sha256,
         "scorer_version": duel_summary.sandbox_source.scorer_version,
@@ -546,7 +529,7 @@ def sn60_final_metrics(
 
 def sn60_local_replica_scores(duel_summary: Sn60DuelSummary) -> dict[str, list[float]]:
     return {
-        "frontier": [result.score for result in duel_summary.frontier.replica_results],
+        "king": [result.score for result in duel_summary.king.replica_results],
         "candidate": [result.score for result in duel_summary.candidate.replica_results],
     }
 
@@ -585,7 +568,7 @@ def sn60_project_list_hash(project_keys: list[str]) -> str:
 
 def sn60_freshness_fingerprint(duel_summary: Sn60DuelSummary) -> str:
     payload = {
-        "frontier_artifact_hash": duel_summary.frontier.artifact_hash,
+        "king_artifact_hash": duel_summary.king.artifact_hash,
         "candidate_artifact_hash": duel_summary.candidate.artifact_hash,
         "project_keys": duel_summary.project_keys,
         "replicas_per_project": duel_summary.replicas_per_project,
@@ -613,28 +596,16 @@ def render_challenge_summary(summary: ChallengeSummary) -> str:
     lines.append(f"Candidate artifact: `{summary.candidate_artifact}`")
     lines.append(f"Evaluator version: {summary.evaluator_version}")
     lines.append(f"Validator model: {summary.validator_model}")
-    lines.append(f"Frontier artifact hash: {short_hash(summary.frontier_artifact_hash)}")
+    lines.append(f"King artifact hash: {short_hash(summary.king_artifact_hash)}")
     lines.append(f"Candidate artifact hash: {short_hash(summary.candidate_artifact_hash)}")
     if summary.primary_pool_fingerprint:
         lines.append(
             f"Primary pool fingerprint: {short_hash(summary.primary_pool_fingerprint)}"
         )
-    if summary.holdout_pool_fingerprint:
-        lines.append(
-            f"Holdout pool fingerprint: {short_hash(summary.holdout_pool_fingerprint)}"
-        )
     lines.append("")
     lines.append("Primary pool")
     lines.extend(render_pool(summary.primary))
-    if summary.holdout is not None:
-        lines.append("")
-        lines.append("Holdout pool")
-        lines.extend(render_pool(summary.holdout))
     lines.append("")
-    lines.append(f"Promotion margin: {summary.promotion_margin_points:.1f} points")
-    lines.append(
-        f"Holdout margin: {summary.holdout_promotion_margin_points:.1f} points"
-    )
     lines.append(f"Promotion ready: {'yes' if summary.promotion_ready else 'no'}")
     lines.append(f"Reason: {summary.promotion_reason}")
     return "\n".join(lines)
@@ -642,7 +613,6 @@ def render_challenge_summary(summary: ChallengeSummary) -> str:
 
 def load_challenge_summary(path: str) -> ChallengeSummary:
     payload = json.loads(Path(path).expanduser().resolve().read_text(encoding="utf-8"))
-    holdout_payload = payload.get("holdout")
     return ChallengeSummary(
         schema_version=payload["schema_version"],
         run_id=payload["run_id"],
@@ -650,19 +620,13 @@ def load_challenge_summary(path: str) -> ChallengeSummary:
         mode=payload["mode"],
         evaluator_version=payload.get("evaluator_version", ""),
         validator_model=payload.get("validator_model", SN60_VALIDATOR_MODEL),
-        frontier_artifact=payload["frontier_artifact"],
+        king_artifact=payload["king_artifact"],
         candidate_artifact=payload["candidate_artifact"],
-        frontier_artifact_hash=payload.get("frontier_artifact_hash", ""),
+        king_artifact_hash=payload.get("king_artifact_hash", ""),
         candidate_artifact_hash=payload.get("candidate_artifact_hash", ""),
         primary_pool_fingerprint=payload.get("primary_pool_fingerprint"),
-        holdout_pool_fingerprint=payload.get("holdout_pool_fingerprint"),
-        promotion_margin_points=payload.get("promotion_margin_points", 0.0),
-        holdout_promotion_margin_points=payload.get(
-            "holdout_promotion_margin_points", 0.0
-        ),
         created_at=payload["created_at"],
         primary=parse_challenge_pool(payload["primary"]),
-        holdout=parse_challenge_pool(holdout_payload) if holdout_payload else None,
         promotion_ready=payload["promotion_ready"],
         promotion_reason=payload["promotion_reason"],
     )
@@ -671,19 +635,19 @@ def load_challenge_summary(path: str) -> ChallengeSummary:
 def parse_challenge_pool(payload: dict[str, object]) -> ChallengePoolSummary:
     variant_scores = payload.get("variant_scores") or {}
     candidate_score = float(variant_scores.get("candidate", 0.0)) if variant_scores else 0.0
-    frontier_score = float(variant_scores.get("frontier", 0.0)) if variant_scores else 0.0
+    king_score = float(variant_scores.get("king", 0.0)) if variant_scores else 0.0
     return ChallengePoolSummary(
-        task_ids=list(payload["task_ids"]),
-        eval_run_summary=str(payload["eval_run_summary"]),
-        total_task_weight=float(payload.get("total_task_weight", len(payload["task_ids"]))),
+        project_keys=list(payload["project_keys"]),
+        run_summary_path=str(payload["run_summary_path"]),
+        total_task_weight=float(payload.get("total_task_weight", len(payload["project_keys"]))),
         variant_successes=dict(payload.get("variant_successes") or {}),
-        variant_invalid_tasks=dict(payload.get("variant_invalid_tasks") or {}),
+        variant_invalid_runs=dict(payload.get("variant_invalid_runs") or {}),
         variant_scores={name: float(score) for name, score in variant_scores.items()},
-        candidate_beats_frontier=bool(
-            payload.get("candidate_beats_frontier", candidate_score > frontier_score)
+        candidate_beats_king=bool(
+            payload.get("candidate_beats_king", candidate_score > king_score)
         ),
         candidate_score_delta=float(
-            payload.get("candidate_score_delta", round(candidate_score - frontier_score, 2))
+            payload.get("candidate_score_delta", round(candidate_score - king_score, 2))
         ),
     )
 
@@ -712,18 +676,18 @@ def parse_challenge_pool(payload: dict[str, object]) -> ChallengePoolSummary:
 
 def render_pool(pool: ChallengePoolSummary) -> list[str]:
     lines = [
-        f"- Tasks: {', '.join(pool.task_ids)}",
-        f"- Eval run: `{pool.eval_run_summary}`",
+        f"- Projects: {', '.join(pool.project_keys)}",
+        f"- Run summary: `{pool.run_summary_path}`",
         f"- Total task weight: {pool.total_task_weight:g}",
     ]
-    for variant_name in ("frontier", "candidate"):
-        lines.append(f"- {variant_name} solved: {pool.variant_successes.get(variant_name, 0)}")
+    for variant_name in ("king", "candidate"):
+        lines.append(f"- {variant_name} passed: {pool.variant_successes.get(variant_name, 0)}")
         lines.append(
-            f"- {variant_name} invalid tasks: {pool.variant_invalid_tasks.get(variant_name, 0)}"
+            f"- {variant_name} invalid runs: {pool.variant_invalid_runs.get(variant_name, 0)}"
         )
         lines.append(f"- {variant_name} score: {pool.variant_scores.get(variant_name, 0.0):.2f}")
     lines.append(
-        f"- Candidate beats frontier: {'yes' if pool.candidate_beats_frontier else 'no'}"
+        f"- Candidate beats king: {'yes' if pool.candidate_beats_king else 'no'}"
     )
     lines.append(f"- Candidate score delta: {pool.candidate_score_delta:+.2f}")
     return lines

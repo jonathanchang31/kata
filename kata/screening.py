@@ -288,11 +288,11 @@ def screening_result_payload(result: Sn60ScreeningResult) -> dict[str, object]:
 
 def sn60_screening_freshness_fingerprint(
     *,
-    frontier_artifact_hash: str,
+    king_artifact_hash: str,
     screening_result: Sn60ScreeningResult,
 ) -> str:
     payload = {
-        "frontier_artifact_hash": frontier_artifact_hash,
+        "king_artifact_hash": king_artifact_hash,
         "candidate_artifact_hash": screening_result.artifact_hash,
         "project_key": screening_result.project_key,
         "screening_status": screening_result.status,

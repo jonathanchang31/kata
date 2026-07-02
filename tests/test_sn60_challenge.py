@@ -54,9 +54,9 @@ def test_run_sn60_challenge_decides_winner_and_records_lane_provenance(
 ) -> None:
     sandbox_root = tmp_path / "sandbox"
     benchmark_path = write_sandbox_source(sandbox_root)
-    frontier_root = tmp_path / "frontier"
+    king_root = tmp_path / "king"
     candidate_root = tmp_path / "candidate"
-    write_bundle(frontier_root, "frontier")
+    write_bundle(king_root, "king")
     write_bundle(candidate_root, "candidate")
 
     def execute(context: Sn60ReplicaContext) -> dict[str, object]:
@@ -95,7 +95,7 @@ def test_run_sn60_challenge_decides_winner_and_records_lane_provenance(
         return {"success": True, "report": {"vulnerabilities": []}}
 
     summary = run_sn60_challenge(
-        frontier_artifact_path=str(frontier_root),
+        king_artifact_path=str(king_root),
         candidate_artifact_path=str(candidate_root),
         project_keys=["project-alpha"],
         candidate_submission_id="miner-sn60-1",
@@ -112,10 +112,10 @@ def test_run_sn60_challenge_decides_winner_and_records_lane_provenance(
 
     assert summary.mode == "miner"
     assert summary.promotion_ready
-    assert summary.primary.variant_scores == {"frontier": 0.0, "candidate": 100.0}
-    assert summary.primary.variant_successes == {"frontier": 0, "candidate": 1}
+    assert summary.primary.variant_scores == {"king": 0.0, "candidate": 100.0}
+    assert summary.primary.variant_successes == {"king": 0, "candidate": 1}
     assert summary.primary.total_task_weight == 1.0
-    assert summary.primary.candidate_beats_frontier
+    assert summary.primary.candidate_beats_king
     assert summary.primary_pool_fingerprint
 
     persisted = load_challenge_summary(
@@ -137,9 +137,8 @@ def test_run_sn60_challenge_decides_winner_and_records_lane_provenance(
     assert promotion_record.final_winner == "candidate"
     assert promotion_record.final_metrics["promotion_ready"] is True
     assert promotion_record.final_metrics["candidate_aggregated_score"] == 1.0
-    assert promotion_record.final_metrics["frontier_aggregated_score"] == 0.0
-    assert promotion_record.final_metrics["candidate_average_score"] == 1.0
-    assert promotion_record.pass_counts == {"frontier": 0, "candidate": 1}
+    assert promotion_record.final_metrics["king_aggregated_score"] == 0.0
+    assert promotion_record.pass_counts == {"king": 0, "candidate": 1}
     assert promotion_record.local_replica_scores["candidate"] == [1.0, 1.0]
 
     snapshot = load_benchmark_snapshot(
@@ -159,23 +158,23 @@ def test_run_sn60_challenge_decides_winner_and_records_lane_provenance(
 
 
 def test_evaluate_sn60_promotion_rejects_invalid_candidate() -> None:
-    frontier = build_variant(
-        "frontier", aggregated_score=0.5, codebase_pass_count=1, invalid_runs=0
+    king = build_variant(
+        "king", aggregated_score=0.5, codebase_pass_count=1, invalid_runs=0
     )
     candidate = build_variant(
         "candidate", aggregated_score=1.0, codebase_pass_count=2, invalid_runs=1
     )
 
-    decision = evaluate_sn60_promotion(frontier=frontier, candidate=candidate)
+    decision = evaluate_sn60_promotion(king=king, candidate=candidate)
 
     assert not decision.promotion_ready
-    assert decision.final_winner == "frontier"
+    assert decision.final_winner == "king"
     assert decision.reason == "candidate has invalid SN60 replica runs"
 
 
 def test_evaluate_sn60_promotion_uses_pass_count_as_score_tiebreaker() -> None:
-    frontier = build_variant(
-        "frontier",
+    king = build_variant(
+        "king",
         aggregated_score=0.5,
         codebase_pass_count=1,
         true_positives=4,
@@ -187,15 +186,15 @@ def test_evaluate_sn60_promotion_uses_pass_count_as_score_tiebreaker() -> None:
         true_positives=4,
     )
 
-    decision = evaluate_sn60_promotion(frontier=frontier, candidate=candidate)
+    decision = evaluate_sn60_promotion(king=king, candidate=candidate)
 
     assert decision.promotion_ready
     assert decision.final_winner == "candidate"
 
 
 def test_evaluate_sn60_promotion_uses_true_positives_as_final_tiebreaker() -> None:
-    frontier = build_variant(
-        "frontier",
+    king = build_variant(
+        "king",
         aggregated_score=0.5,
         codebase_pass_count=1,
         true_positives=4,
@@ -207,7 +206,7 @@ def test_evaluate_sn60_promotion_uses_true_positives_as_final_tiebreaker() -> No
         true_positives=6,
     )
 
-    decision = evaluate_sn60_promotion(frontier=frontier, candidate=candidate)
+    decision = evaluate_sn60_promotion(king=king, candidate=candidate)
 
     assert decision.promotion_ready
     assert decision.final_winner == "candidate"
@@ -216,9 +215,9 @@ def test_evaluate_sn60_promotion_uses_true_positives_as_final_tiebreaker() -> No
 def test_sn60_freshness_fingerprint_changes_with_sandbox_commit(tmp_path: Path) -> None:
     sandbox_root = tmp_path / "sandbox"
     benchmark_path = write_sandbox_source(sandbox_root)
-    frontier_root = tmp_path / "frontier"
+    king_root = tmp_path / "king"
     candidate_root = tmp_path / "candidate"
-    write_bundle(frontier_root, "frontier")
+    write_bundle(king_root, "king")
     write_bundle(candidate_root, "candidate")
 
     def execute(context: Sn60ReplicaContext) -> dict[str, object]:
@@ -249,7 +248,7 @@ def test_sn60_freshness_fingerprint_changes_with_sandbox_commit(tmp_path: Path) 
         return {"success": True, "report": {"vulnerabilities": []}}
 
     first = run_sn60_challenge(
-        frontier_artifact_path=str(frontier_root),
+        king_artifact_path=str(king_root),
         candidate_artifact_path=str(candidate_root),
         project_keys=["project-alpha"],
         candidate_submission_id="miner-sn60-1",
@@ -264,7 +263,7 @@ def test_sn60_freshness_fingerprint_changes_with_sandbox_commit(tmp_path: Path) 
         evaluation_hook=evaluate,
     )
     second = run_sn60_challenge(
-        frontier_artifact_path=str(frontier_root),
+        king_artifact_path=str(king_root),
         candidate_artifact_path=str(candidate_root),
         project_keys=["project-alpha"],
         candidate_submission_id="miner-sn60-1",
@@ -287,9 +286,9 @@ def test_run_sn60_challenge_stops_before_duel_when_screening_fails(
 ) -> None:
     sandbox_root = tmp_path / "sandbox"
     benchmark_path = write_sandbox_source(sandbox_root)
-    frontier_root = tmp_path / "frontier"
+    king_root = tmp_path / "king"
     candidate_root = tmp_path / "candidate"
-    write_bundle(frontier_root, "frontier")
+    write_bundle(king_root, "king")
     write_bundle(candidate_root, "candidate")
 
     execution_called = False
@@ -303,7 +302,7 @@ def test_run_sn60_challenge_stops_before_duel_when_screening_fails(
         return {"success": True, "report": {"vulnerabilities": []}}
 
     summary = run_sn60_challenge(
-        frontier_artifact_path=str(frontier_root),
+        king_artifact_path=str(king_root),
         candidate_artifact_path=str(candidate_root),
         project_keys=["project-alpha"],
         candidate_submission_id="miner-sn60-1",
@@ -335,7 +334,7 @@ def test_run_sn60_challenge_stops_before_duel_when_screening_fails(
         public_root=str(tmp_path / "public"),
     )
     assert challenge_state.screening_result["status"] == "failed"
-    assert promotion_record.final_winner == "frontier"
+    assert promotion_record.final_winner == "king"
 
     snapshot = load_benchmark_snapshot(
         SN60_MINER_LANE_ID,

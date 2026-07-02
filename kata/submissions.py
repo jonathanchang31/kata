@@ -172,12 +172,12 @@ class SubmissionVerificationResult:
     submission_id: str
     candidate_artifact_hash: str
     recorded_candidate_artifact_hash: str
-    current_frontier_artifact_hash: str
-    recorded_frontier_artifact_hash: str
+    current_king_artifact_hash: str
+    recorded_king_artifact_hash: str
     current_validator_model: str
     recorded_validator_model: str
     submission_matches_challenge: bool
-    frontier_is_current: bool
+    king_is_current: bool
     benchmark_is_current: bool
     promotion_ready: bool
     auto_merge_ready: bool
@@ -391,9 +391,9 @@ def evaluate_submission(
             "SN60 miner evaluation requires at least one project key. "
             "Pass --sn60-project-key or set KATA_SN60_PROJECT_KEYS."
         )
-    lane_id, frontier_artifact_path = resolve_sn60_king_artifact(validation.metadata)
+    lane_id, king_artifact_path = resolve_sn60_king_artifact(validation.metadata)
     return run_sn60_challenge(
-        frontier_artifact_path=frontier_artifact_path,
+        king_artifact_path=king_artifact_path,
         candidate_artifact_path=validation.submission_path,
         project_keys=project_keys,
         candidate_submission_id=validation.metadata.submission_id,
@@ -586,7 +586,7 @@ def verify_submission_result(
             "No evaluator-backed lane is registered for "
             f"`{validation.metadata.repo_pack}/{validation.metadata.mode}`."
         )
-    current_frontier_hash = (
+    current_king_hash = (
         resolve_sn60_lane_king_hash(
             evaluator_entry.lane_id,
             repo_pack=validation.metadata.repo_pack,
@@ -601,7 +601,7 @@ def verify_submission_result(
         summary.mode == validation.metadata.mode
         and summary.candidate_artifact_hash == candidate_hash
     )
-    frontier_is_current = summary.frontier_artifact_hash == current_frontier_hash
+    king_is_current = summary.king_artifact_hash == current_king_hash
     benchmark_is_current = (
         summary.validator_model == SN60_VALIDATOR_MODEL and lane_benchmark_is_current
     )
@@ -610,8 +610,8 @@ def verify_submission_result(
     reasons: list[str] = []
     if not submission_matches:
         reasons.append("Challenge result does not match the current submission payload.")
-    if not frontier_is_current:
-        reasons.append("Challenge result is stale because the frontier artifact has changed.")
+    if not king_is_current:
+        reasons.append("Challenge result is stale because the king artifact has changed.")
     if not benchmark_is_current:
         reasons.append("Challenge result is stale because the SN60 benchmark lane has changed.")
     if not current_promotion_ready:
@@ -625,16 +625,16 @@ def verify_submission_result(
         submission_id=validation.metadata.submission_id,
         candidate_artifact_hash=candidate_hash,
         recorded_candidate_artifact_hash=summary.candidate_artifact_hash,
-        current_frontier_artifact_hash=current_frontier_hash,
-        recorded_frontier_artifact_hash=summary.frontier_artifact_hash,
+        current_king_artifact_hash=current_king_hash,
+        recorded_king_artifact_hash=summary.king_artifact_hash,
         current_validator_model=SN60_VALIDATOR_MODEL,
         recorded_validator_model=summary.validator_model,
         submission_matches_challenge=submission_matches,
-        frontier_is_current=frontier_is_current,
+        king_is_current=king_is_current,
         benchmark_is_current=benchmark_is_current,
         promotion_ready=current_promotion_ready,
         auto_merge_ready=submission_matches
-        and frontier_is_current
+        and king_is_current
         and benchmark_is_current
         and current_promotion_ready,
         reasons=reasons,
@@ -670,7 +670,7 @@ def decide_submission_action(
             repo_pack=verification.repo_pack,
             mode=verification.mode,
             submission_id=verification.submission_id,
-            reason="Submission beat the current frontier and is safe to auto-merge.",
+            reason="Submission beat the current king and is safe to auto-merge.",
             reasons=[],
             promotion_ready=verification.promotion_ready,
             auto_merge_ready=verification.auto_merge_ready,
@@ -689,14 +689,14 @@ def decide_submission_action(
             repo_pack=verification.repo_pack,
             mode=verification.mode,
             submission_id=verification.submission_id,
-            reason="Submission result is stale and must be rerun against the current frontier.",
+            reason="Submission result is stale and must be rerun against the current king.",
             reasons=stale_reasons,
             promotion_ready=verification.promotion_ready,
             auto_merge_ready=False,
         )
 
     losing_reasons = verification.reasons or [
-        "Submission did not satisfy the promotion rule against the current frontier."
+        "Submission did not satisfy the promotion rule against the current king."
     ]
     return SubmissionDecisionResult(
         action=PR_ACTION_CLOSE_LOSING,
@@ -705,7 +705,7 @@ def decide_submission_action(
         repo_pack=verification.repo_pack,
         mode=verification.mode,
         submission_id=verification.submission_id,
-        reason="Submission lost to the current frontier and should be auto-closed.",
+        reason="Submission lost to the current king and should be auto-closed.",
         reasons=losing_reasons,
         promotion_ready=verification.promotion_ready,
         auto_merge_ready=False,
@@ -763,7 +763,7 @@ def promote_lane_king(
         submission_id=verification.submission_id,
         challenge_run_id=summary.run_id,
         candidate_artifact_path=verification.submission_path,
-        frontier_artifact_hash=verification.candidate_artifact_hash,
+        king_artifact_hash=verification.candidate_artifact_hash,
         candidate_artifact_hash=verification.candidate_artifact_hash,
     )
     now = datetime.now(UTC).isoformat()
@@ -834,7 +834,7 @@ def render_submission_verification(result: SubmissionVerificationResult) -> str:
         "Submission matches challenge: "
         + ("yes" if result.submission_matches_challenge else "no")
     )
-    lines.append(f"Frontier is current: {'yes' if result.frontier_is_current else 'no'}")
+    lines.append(f"King is current: {'yes' if result.king_is_current else 'no'}")
     lines.append(f"Benchmark lane is current: {'yes' if result.benchmark_is_current else 'no'}")
     lines.append(f"Promotion ready: {'yes' if result.promotion_ready else 'no'}")
     lines.append(f"Auto-merge ready: {'yes' if result.auto_merge_ready else 'no'}")

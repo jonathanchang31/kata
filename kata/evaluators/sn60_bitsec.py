@@ -16,7 +16,7 @@ from kata.provenance import sha256_directory
 from kata.util import write_json
 
 SN60_BITSEC_EVALUATOR_ID = "sn60_bitsec"
-DEFAULT_SN60_DUEL_SCHEMA_VERSION = 1
+DEFAULT_SN60_DUEL_SCHEMA_VERSION = 2
 DEFAULT_SANDBOX_PROXY_NETWORK = "bitsec-net"
 DEFAULT_SANDBOX_PROXY_URL = "http://localhost:8087"
 DEFAULT_SANDBOX_INFERENCE_API = "http://bitsec_proxy:8000"
@@ -104,7 +104,7 @@ class Sn60DuelSummary:
     project_keys: list[str]
     replicas_per_project: int
     sandbox_source: Sn60SandboxSource
-    frontier: Sn60VariantSummary
+    king: Sn60VariantSummary
     candidate: Sn60VariantSummary
 
 
@@ -114,7 +114,7 @@ Sn60EvaluationHook = Callable[[Sn60ReplicaContext, dict[str, object]], dict[str,
 
 def run_sn60_bitsec_duel(
     *,
-    frontier_artifact_path: str,
+    king_artifact_path: str,
     candidate_artifact_path: str,
     project_keys: list[str],
     output_root: str | None = None,
@@ -137,7 +137,7 @@ def run_sn60_bitsec_duel(
         sandbox_commit=sandbox_commit,
         scorer_version=scorer_version,
     )
-    frontier_root = Path(frontier_artifact_path).expanduser().resolve()
+    king_root = Path(king_artifact_path).expanduser().resolve()
     candidate_root = Path(candidate_artifact_path).expanduser().resolve()
     output_base = (
         Path(output_root).expanduser().resolve()
@@ -148,11 +148,11 @@ def run_sn60_bitsec_duel(
     run_root = output_base / run_id
     run_root.mkdir(parents=True, exist_ok=False)
 
-    frontier_summary = evaluate_variant(
+    king_summary = evaluate_variant(
         run_id=run_id,
         run_root=run_root,
-        variant_name="frontier",
-        artifact_root=frontier_root,
+        variant_name="king",
+        artifact_root=king_root,
         project_keys=project_keys,
         replicas_per_project=replicas_per_project,
         sandbox_source=source,
@@ -179,7 +179,7 @@ def run_sn60_bitsec_duel(
         project_keys=list(project_keys),
         replicas_per_project=replicas_per_project,
         sandbox_source=source,
-        frontier=frontier_summary,
+        king=king_summary,
         candidate=candidate_summary,
     )
     write_sn60_duel_summary(run_root / "duel_summary.json", summary)

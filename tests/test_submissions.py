@@ -370,7 +370,7 @@ def run_registry_lane_sn60_duel(tmp_path: Path, monkeypatch):
         }
 
     summary = run_sn60_challenge(
-        frontier_artifact_path=str(king_root),
+        king_artifact_path=str(king_root),
         candidate_artifact_path=str(submission_root),
         project_keys=["project-alpha"],
         candidate_submission_id="alice-20260702-10",
@@ -499,7 +499,7 @@ def test_evaluate_submission_uses_seeded_lane_king_for_registry_lane(
     )
 
     assert summary is sentinel
-    assert calls["frontier_artifact_path"] == str(king_root.resolve())
+    assert calls["king_artifact_path"] == str(king_root.resolve())
     assert calls["lane_id"] == "sn60__bitsec"
 
 
@@ -574,7 +574,7 @@ def test_evaluate_submission_selects_sn60_adapter_by_registry_evaluator_id(
 
     assert summary is sentinel
     assert calls["lane_id"] == "sn99__custom"
-    assert calls["frontier_artifact_path"] == str(king_root.resolve())
+    assert calls["king_artifact_path"] == str(king_root.resolve())
 
 
 def test_verify_and_promote_sn60_registry_lane_end_to_end(
@@ -587,7 +587,7 @@ def test_verify_and_promote_sn60_registry_lane_end_to_end(
 
     verification = verify_submission_result(str(submission_root), str(summary_path))
     assert verification.submission_matches_challenge
-    assert verification.frontier_is_current
+    assert verification.king_is_current
     assert verification.benchmark_is_current
     assert verification.promotion_ready
     assert verification.auto_merge_ready
@@ -627,7 +627,7 @@ def test_verify_sn60_registry_lane_detects_stale_benchmark_snapshot(
 
     verification = verify_submission_result(str(submission_root), str(summary_path))
     assert verification.submission_matches_challenge
-    assert verification.frontier_is_current
+    assert verification.king_is_current
     assert not verification.benchmark_is_current
     assert not verification.auto_merge_ready
     assert any("SN60 benchmark lane has changed" in reason for reason in verification.reasons)
