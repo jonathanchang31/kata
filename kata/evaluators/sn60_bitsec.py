@@ -431,19 +431,30 @@ def extract_evaluation_metrics(evaluation_payload: dict[str, object]) -> dict[st
     result_payload = evaluation_payload.get("result")
     if not isinstance(result_payload, dict):
         result_payload = {}
+    is_success = status_value == "success"
     detection_rate = float(result_payload.get("detection_rate", 0.0) or 0.0)
+    # Every metric is gated on evaluation success: a non-success replica must
+    # not contribute a PASS or inflate true-positive counts. The king variant
+    # is never gated on invalid_runs, so ungated metrics would silently raise
+    # the promotion bar with data from failed runs.
     return {
         "evaluation_status": status_value,
-        "score": detection_rate if status_value == "success" else 0.0,
-        "detection_rate": detection_rate if status_value == "success" else 0.0,
+        "score": detection_rate if is_success else 0.0,
+        "detection_rate": detection_rate if is_success else 0.0,
         "result": (
             str(result_payload["result"])
-            if result_payload.get("result") is not None
+            if is_success and result_payload.get("result") is not None
             else None
         ),
-        "true_positives": int(result_payload.get("true_positives", 0) or 0),
-        "total_expected": int(result_payload.get("total_expected", 0) or 0),
-        "total_found": int(result_payload.get("total_found", 0) or 0),
+        "true_positives": (
+            int(result_payload.get("true_positives", 0) or 0) if is_success else 0
+        ),
+        "total_expected": (
+            int(result_payload.get("total_expected", 0) or 0) if is_success else 0
+        ),
+        "total_found": (
+            int(result_payload.get("total_found", 0) or 0) if is_success else 0
+        ),
     }
 
 
@@ -458,7 +469,7 @@ def build_default_execution_hook(source: Sn60SandboxSource) -> Sn60ExecutionHook
             cwd=source.sandbox_root,
             capture_output=True,
             text=True,
-            env={**default_subprocess_env(), **env},
+            env={**execution_subprocess_env(), **env},
         )
         report_path = Path(context.report_path)
         if report_path.exists():
@@ -558,6 +569,8 @@ def bitsec_project_image(project_key: str) -> str:
 
 
 def build_bitsec_evaluation_command(context: Sn60ReplicaContext) -> list[str]:
+    # repr() quotes the interpolated values so a project key or path
+    # containing quote characters cannot break or alter the script.
     script = (
         "import json; "
         "from validator.executor import AgentExecutor; "
@@ -566,12 +579,12 @@ def build_bitsec_evaluation_command(context: Sn60ReplicaContext) -> list[str]:
         "executor = AgentExecutor("
         "job_run=MockJobRun(id=1, job_id=1, validator_id=1, agent_id=1), "
         "agent_filepath='', "
-        "project_key='"
-        + context.project_key
-        + "', "
-        "job_run_reports_dir='"
-        + str(Path(context.reports_root).parent.resolve())
-        + "', "
+        "project_key="
+        + repr(str(context.project_key))
+        + ", "
+        "job_run_reports_dir="
+        + repr(str(Path(context.reports_root).parent.resolve()))
+        + ", "
         "platform_client=MockPlatformClient(), "
         "eval_max_vulns="
         + str(DEFAULT_EVAL_MAX_VULNS)
@@ -581,8 +594,26 @@ def build_bitsec_evaluation_command(context: Sn60ReplicaContext) -> list[str]:
     return ["uv", "run", "python", "-c", script]
 
 
+# Validator-owned scoring secrets that the miner execution path must never
+# see. Docker's `--env` allowlist is the primary boundary; keeping these out
+# of the docker-CLI process env means a single allowlist mistake cannot
+# expose them.
+VALIDATOR_ONLY_SECRET_ENV_VARS = (
+    "CHUTES_API_KEY",
+    "KATA_VALIDATOR_API_KEY",
+)
+
+
 def default_subprocess_env() -> dict[str, str]:
     return dict(os.environ)
+
+
+def execution_subprocess_env() -> dict[str, str]:
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name not in VALIDATOR_ONLY_SECRET_ENV_VARS
+    }
 
 
 def required_env(name: str) -> str:

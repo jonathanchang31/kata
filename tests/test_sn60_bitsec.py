@@ -255,7 +255,7 @@ def test_resolve_sn60_sandbox_source_rejects_mismatched_pinned_commit(
         )
 
 
-def test_extract_evaluation_metrics_treats_non_success_as_zero_score() -> None:
+def test_extract_evaluation_metrics_gates_all_metrics_on_success() -> None:
     metrics = extract_evaluation_metrics(
         {
             "status": "error",
@@ -272,4 +272,76 @@ def test_extract_evaluation_metrics_treats_non_success_as_zero_score() -> None:
     assert metrics["evaluation_status"] == "error"
     assert metrics["score"] == 0.0
     assert metrics["detection_rate"] == 0.0
-    assert metrics["true_positives"] == 8
+    # A failed evaluation must not contribute a PASS or true positives; the
+    # king variant is never invalid-gated, so ungated metrics would inflate
+    # the promotion bar.
+    assert metrics["result"] is None
+    assert metrics["true_positives"] == 0
+    assert metrics["total_expected"] == 0
+    assert metrics["total_found"] == 0
+
+
+def test_extract_evaluation_metrics_keeps_metrics_for_success() -> None:
+    metrics = extract_evaluation_metrics(
+        {
+            "status": "success",
+            "result": {
+                "detection_rate": 0.75,
+                "true_positives": 6,
+                "total_expected": 8,
+                "total_found": 7,
+                "result": "PASS",
+            },
+        }
+    )
+
+    assert metrics["evaluation_status"] == "success"
+    assert metrics["score"] == 0.75
+    assert metrics["result"] == "PASS"
+    assert metrics["true_positives"] == 6
+    assert metrics["total_expected"] == 8
+    assert metrics["total_found"] == 7
+
+
+def test_execution_subprocess_env_strips_validator_scoring_secrets(
+    monkeypatch,
+) -> None:
+    from kata.evaluators.sn60_bitsec import execution_subprocess_env
+
+    monkeypatch.setenv("CHUTES_API_KEY", "scoring-key")
+    monkeypatch.setenv("KATA_VALIDATOR_API_KEY", "validator-key")
+    monkeypatch.setenv("INFERENCE_API_KEY", "miner-key")
+
+    env = execution_subprocess_env()
+
+    assert "CHUTES_API_KEY" not in env
+    assert "KATA_VALIDATOR_API_KEY" not in env
+    assert env["INFERENCE_API_KEY"] == "miner-key"
+
+
+def test_build_bitsec_evaluation_command_quotes_interpolated_values(
+    tmp_path: Path,
+) -> None:
+    from kata.evaluators.sn60_bitsec import build_bitsec_evaluation_command
+
+    context = Sn60ReplicaContext(
+        run_id="run-1",
+        variant_name="candidate",
+        project_key="project'; import os; os.system('x'); '",
+        replica_index=1,
+        bundle_root=str(tmp_path / "bundle"),
+        reports_root=str(tmp_path / "reports" / "project-a"),
+        report_path=str(tmp_path / "reports" / "project-a" / "report.json"),
+        evaluation_path=str(tmp_path / "reports" / "project-a" / "evaluation.json"),
+        sandbox_source=None,
+    )
+
+    command = build_bitsec_evaluation_command(context)
+
+    script = command[-1]
+    # The hostile project key must survive as a single quoted literal instead
+    # of terminating the string and injecting statements.
+    assert repr(context.project_key) in script
+    import ast
+
+    ast.parse(script)

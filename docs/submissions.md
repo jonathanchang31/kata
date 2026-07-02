@@ -16,7 +16,6 @@ submissions/
       <submission-id>/
         agent.py
         agent_manifest.json
-        helpers/*.py
         submission.json
 ```
 
@@ -65,14 +64,6 @@ Current requirements:
 - `runtime = "python"`
 - `entrypoint = "agent.py"`
 
-### `helpers/*.py`
-
-Optional helper modules may live under `helpers/`.
-
-Current validator rule:
-
-- only Python files under `helpers/` are allowed
-
 ### `submission.json`
 
 This identifies the target competition lane.
@@ -83,7 +74,7 @@ Example:
 {
   "schema_version": 2,
   "repo_pack": "example__repo",
-  "mode": "contributor",
+  "mode": "miner",
   "submission_id": "carlos4s-20260629-01",
   "created_at": "2026-06-29T00:00:00+00:00",
   "author": "carlos4s",
@@ -164,7 +155,7 @@ Promotion gate (in order):
 
 Candidates with invalid replica runs never promote.
 
-## Stale Frontier Protection
+## Stale King Protection
 
 Results are only safe to merge if the lane has not changed since evaluation.
 
@@ -179,10 +170,10 @@ uv run kata submission verify \
 Verification checks that:
 
 - the submission hash still matches the evaluated candidate
-- the king/frontier hash is still current
+- the king artifact hash is still current
 - the evaluator version is still current
 - the validator model is still current
-- the public and private pool fingerprints are still current
+- the benchmark lane fingerprint is still current
 - the challenge itself is promotion-ready
 
 If any of those drift, the result is stale and should be rerun.
@@ -210,7 +201,7 @@ If the decision is `merge`, the bot or maintainer can promote the verified
 submission:
 
 ```bash
-uv run kata frontier promote \
+uv run kata king promote \
   --challenge-run <challenge-summary.json> \
   --submission-path <submission-dir>
 ```
@@ -219,7 +210,7 @@ The production bot does more than promotion:
 
 1. merge the winning PR
 2. update the king under `kings/<repo-pack>/<mode>/`
-3. update frontier manifests
+3. update the lane king state
 4. clear the merged `submissions/.../<submission-id>/` directory from `main`
 
 So `submissions/` stays empty between active miner PRs, while `kings/` remains

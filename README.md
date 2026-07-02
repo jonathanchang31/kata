@@ -58,7 +58,7 @@ KATA_SN60_PROJECT_KEYS=project-a uv run kata submission evaluate \
 # verify, decide, and promote
 uv run kata submission verify --path <submission> --challenge-run <summary>
 uv run kata submission decide --path <submission> --challenge-run <summary>
-uv run kata frontier promote --challenge-run <summary> --submission-path <submission>
+uv run kata king promote --challenge-run <summary> --submission-path <submission>
 ```
 
 ## Environment

@@ -10,7 +10,7 @@ Kata is the evaluation engine. GitHub-specific automation lives in
 - `kata-bot`
   - webhook relay, durable PR queue, resident validator service
   - runs `kata submission inspect-pr / validate / evaluate / verify / decide`
-  - merges winners, applies GitTensor labels, runs `kata frontier promote`
+  - merges winners, applies GitTensor labels, runs `kata king promote`
 
 ## Flow
 

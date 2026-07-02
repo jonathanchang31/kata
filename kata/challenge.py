@@ -43,6 +43,7 @@ from kata.screening import (
 SN60_MINER_LANE_ID = "sn60__bitsec"
 SN60_MINER_MODE = "miner"
 SN60_VALIDATOR_MODEL = "sn60-bitsec-sandbox"
+CHALLENGE_SUMMARY_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -229,7 +230,7 @@ def sn60_duel_to_challenge_summary(
     freshness_fingerprint = sn60_freshness_fingerprint(duel_summary)
     duel_summary_path = Path(duel_summary.output_root) / "duel_summary.json"
     return ChallengeSummary(
-        schema_version=5,
+        schema_version=CHALLENGE_SUMMARY_SCHEMA_VERSION,
         run_id=duel_summary.run_id,
         manifest_path=str(duel_summary_path),
         mode=SN60_MINER_MODE,
@@ -302,7 +303,7 @@ def build_sn60_screening_failure_summary(
     )
     reason = "; ".join(screening.reasons) if screening.reasons else "unknown screening failure"
     return ChallengeSummary(
-        schema_version=5,
+        schema_version=CHALLENGE_SUMMARY_SCHEMA_VERSION,
         run_id=screening.run_id,
         manifest_path=screening.result_path,
         mode=SN60_MINER_MODE,
