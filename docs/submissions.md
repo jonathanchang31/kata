@@ -84,14 +84,18 @@ Requirements:
 - `agent_main` must be callable with no arguments.
 - It must return a JSON-serializable dictionary.
 - The returned dictionary must include a top-level `vulnerabilities` list.
-- Each screening finding must describe a plausible high or critical security
-  issue and include a source location hint.
-- Screening rejects direct no-op returns such as `{"vulnerabilities": []}`.
+- Each finding should describe a plausible high or critical security issue with a
+  source location, so the scorer can match it to a real benchmark vulnerability.
+- Do **not** directly return a no-op such as `{"vulnerabilities": []}`; a stub
+  agent that does no analysis is rejected up front (see the screening gate below).
+  A *non-stub* agent that happens to find nothing on a run is fine — it just
+  scores 0 there, it is not rejected.
 - The file must contain valid Python syntax.
 - The file must not be the scaffold placeholder.
 - The implementation must be self-contained for SN60 V1.
-- Keep screening fast. The recommended MVP validator rejects the one screening
-  sandbox run after `300` seconds.
+- Be efficient: your agent has a per-problem runtime budget, so prioritise the
+  most suspicious files first. Running out of time on a problem scores 0 for that
+  problem — it does not close your PR.
 
 ### `agent_manifest.json`
 
@@ -189,40 +193,65 @@ def ask_model(inference_api, prompt):
     return data["choices"][0]["message"]["content"]
 ```
 
-If the model call fails and your agent returns an empty `vulnerabilities` list,
-screening treats the submission as a no-op and closes the PR before the full
-duel. Test locally before opening a PR.
+If a model call fails and your agent returns an empty `vulnerabilities` list, your
+PR is **not** closed — that problem simply scores 0 and the duel continues to the
+rest. But an agent that finds nothing cannot out-detect the king, so test your
+inference contract locally first.
 
-## Screening Checklist
+The pinned model is a reasoning model. The validator gives it enough token budget
+to both think and answer, so your `max_tokens` is raised to a safe ceiling
+automatically — you do not need a large value. Read the final answer from
+`choices[0].message.content` (the reasoning trace is separate; the answer you want
+is in `content`).
 
-Screening is the first cost-control gate. It is intentionally stricter than the
-basic shape validator because it decides whether the expensive king-vs-candidate
-duel should run.
+## Screening Gate — what closes a PR, and what does not
 
-Your submission should pass these checks:
+There are exactly **two** ways a PR ends without merging. Knowing which is which
+means nothing surprises you: a bad run on one problem will never sink your PR.
 
-- `agent_main` is synchronous and callable with no arguments.
-- `agent_main` does real analysis; it must not directly return an empty
-  `vulnerabilities` list.
-- Do not swallow inference/API errors and fall back to an empty
-  `vulnerabilities` list. Empty screening reports are treated as no-op
-  submissions.
-- The one screening sandbox run finishes successfully.
-- The screening sandbox run finishes before the validator timeout.
-- The screening report is a JSON object with a top-level `vulnerabilities` list.
-- The screening report contains at least one candidate high/critical
-  vulnerability.
-- Each candidate finding is a JSON object with a non-empty `title`.
-- Each candidate finding has `severity` set to `critical` or `high`.
-- Each candidate finding has a useful `description` of at least 80 characters.
-- Each candidate finding includes a source location hint, either in a `file`,
-  `path`, or `location` field, or by naming a source file such as `Vault.sol`
-  or `program.rs` in the title/description.
-- Do not return more than 100 candidate findings from screening.
+### 1. Static screening — runs BEFORE the duel; the only thing that closes a PR early
 
-The screening finding does not guarantee a true positive. It only proves the
-agent can run and produce a meaningful Bitsec-style report before the validator
-pays for the full duel.
+These are cheap, source-only checks (no model calls). If any fail, the PR is
+closed immediately with a clear reason and **no duel cost is spent**. Pass all of
+these and your submission is guaranteed a fair, full duel:
+
+- Your PR touches exactly one `submissions/<pack>/<mode>/<id>/` directory and
+  edits nothing else (not `kings/`, `lanes/`, evaluator code, tests, or docs).
+- The bundle contains only allowed files — no `helpers/` directory in V1, no
+  symlinks, and within the file-count/size limits.
+- `agent.py` is valid Python and defines a **synchronous** `agent_main` that is
+  callable with **no arguments** (`agent_main()`), returning a dict with a
+  top-level `vulnerabilities` list.
+- `agent_main` is **not a stub**: it must not directly return
+  `{"vulnerabilities": []}` (or an empty list) without doing any analysis.
+- No hardcoded provider secrets anywhere (for example `sk-...`, `ghp_...`,
+  `cpk_...`).
+- No references to validator-only secrets (`CHUTES_API_KEY`,
+  `KATA_VALIDATOR_API_KEY`).
+- No benchmark answer-key leakage tokens (for example `expected_findings`,
+  `ground_truth`, `curated-highs-only`, `scabench`). Find the bugs — do not try
+  to read the answers.
+- Your agent is not a copy of the current king.
+
+### 2. The duel — bad, empty, or slow output NEVER closes your PR
+
+Once static screening passes, your agent runs against **every** sampled problem
+alongside the king. Here, a bad result is only a **0 for that problem** — it is
+never a rejection:
+
+- If your agent errors, times out, or returns no findings on a problem, that
+  problem scores **0** and the duel **continues** to the rest. One bad problem
+  cannot sink an otherwise-good submission.
+- If your inference calls fail and you return an empty list, you are **not
+  rejected** — you simply score 0 and lose on detection. The PR comment tells you
+  how many problems produced findings (for example, "produced findings on 2/6
+  problems") so you can fix your inference contract and resubmit.
+- You lose the duel only when you do not out-detect the king across the sampled
+  problems.
+
+**Takeaway:** take the static checklist seriously — it is the only early gate.
+After that it is purely about detection quality, and no single failed problem or
+flaky run will close your PR.
 
 ## PR Rules
 
@@ -243,8 +272,9 @@ Before opening a PR, verify:
 - `agent.py` exists.
 - `agent.py` defines synchronous `agent_main`.
 - `agent_main` works with no arguments.
-- `agent_main` returns at least one useful candidate vulnerability during
-  screening.
+- `agent_main` is not a stub — it does real analysis (a direct empty return is
+  rejected). When run locally it should produce real findings; an agent that
+  finds nothing is not rejected, but it cannot out-detect the king.
 - `agent_manifest.json` uses schema version `1`, runtime `python`, entrypoint
   `agent.py`.
 - `submission.json` uses schema version `2`, `subnet_pack`, mode `miner`, and a
@@ -266,6 +296,11 @@ uv run kata submission validate \
 
 ## Rejection Conditions
 
+These are the **static** conditions that close a PR *before* the duel. (Runtime
+output problems — empty findings, unparsable reports, timeouts, weak or wrongly
+shaped findings — are **not** rejections; they score 0 on that problem and the
+duel continues. See "Screening Gate" above.)
+
 Kata rejects submissions for:
 
 - invalid PR shape
@@ -276,13 +311,8 @@ Kata rejects submissions for:
 - invalid Python syntax
 - async-only `agent_main`
 - required positional arguments that prevent no-argument invocation
-- missing top-level `vulnerabilities` list
-- direct empty-report or no-op `agent_main` implementations
-- empty screening reports
-- screening findings without a title or useful description
-- screening findings without `high` or `critical` severity
-- screening findings without a source location hint
-- screening reports with more than 100 findings
+- a stub/no-op `agent_main` that directly returns an empty `vulnerabilities` list
+  without any analysis
 - scaffold or duplicate current-king agents
 - helper files in SN60 V1 bundles
 - symlinks
@@ -299,8 +329,8 @@ decided later by the workflow in [workflow.md](workflow.md).
 
 High-level promotion requirements:
 
-- screening must pass
-- candidate must strictly beat the current king
+- static screening must pass (see the Screening Gate above)
+- candidate must strictly beat the current king across the sampled problems
 - the result must still be fresh at merge time
 
 Kata uses SN60-style sampled validation for promotion. The primary score is:
