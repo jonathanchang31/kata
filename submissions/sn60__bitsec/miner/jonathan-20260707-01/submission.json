@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "subnet_pack": "sn60__bitsec",
+  "mode": "miner",
+  "submission_id": "jonathan-20260707-01",
+  "created_at": "2026-07-07T03:20:00+00:00",
+  "author": "jonathan",
+  "title": "Three-pass high-impact auditor",
+  "notes": "Uses repository triage followed by two focused audit passes."
+}
