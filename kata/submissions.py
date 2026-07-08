@@ -3,17 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import secrets
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from kata.agent_bundle import (
-    AGENT_ENTRY_FILENAME,
-    AGENT_MANIFEST_FILENAME,
-    is_allowed_bundle_relative_path,
-    load_bundle_files,
     validate_agent_manifest,
     write_agent_manifest,
 )
@@ -47,139 +42,52 @@ from kata.public_artifacts import (
     resolve_kata_root,
     resolve_public_king_root,
 )
-from kata.screening_system import ScreeningFinding, screen_submission
 from kata.screening_system.rules import (
     find_bundle_symlink_paths,
     hash_submission_bundle,
-    validate_bundle_python_sources,
-    validate_bundle_static_policy,
+)
+from kata.submission_system import (
+    DEFAULT_AGENT_PLACEHOLDER,
+    PR_ACTION_CLOSE_INVALID,
+    PR_ACTION_CLOSE_LOSING,
+    PR_ACTION_EVALUATE,
+    PR_ACTION_MERGE,
+    PR_ACTION_RERUN_STALE,
+    SUBMISSION_AGENT_FILENAME,
+    SUBMISSION_AGENT_MANIFEST_FILENAME,
+    SUBMISSION_METADATA_FILENAME,
+    SUBMISSION_SCHEMA_VERSION,
+    PullRequestInspectionResult,
+    SubmissionCandidateValidation,
+    SubmissionDecisionResult,
+    SubmissionMetadata,
+    SubmissionValidationResult,
+    SubmissionVerificationResult,
+    agent_defines_required_entrypoint,
+    default_submission_agent,
+    default_submission_notes,
+    default_submissions_root,
+    infer_submission_dirs,
+    load_submission_metadata,
+    normalize_changed_paths,
+    required_submission_entrypoint_reason,
+    resolve_submission_descriptor,
+    validate_changed_paths,
+    validate_submission_candidate,
+    validate_submission_metadata,
+    validate_submission_mode,
+    write_submission_metadata,
+)
+from kata.submission_system import (
+    SUPPORTED_SUBMISSION_MODES as SUPPORTED_SUBMISSION_MODES,
+)
+from kata.submission_system import (
+    read_changed_paths_file as read_changed_paths_file,
 )
 from kata.util import dedupe
 
-SUBMISSIONS_DIRNAME = "submissions"
-SUBMISSION_SCHEMA_VERSION = 2
-SUBMISSION_METADATA_FILENAME = "submission.json"
-SUBMISSION_AGENT_FILENAME = AGENT_ENTRY_FILENAME
-SUBMISSION_AGENT_MANIFEST_FILENAME = AGENT_MANIFEST_FILENAME
-TOP_LEVEL_SUBMISSION_FILENAMES = {
-    SUBMISSION_METADATA_FILENAME,
-    SUBMISSION_AGENT_FILENAME,
-    SUBMISSION_AGENT_MANIFEST_FILENAME,
-}
-SUPPORTED_SUBMISSION_MODES = {"miner"}
-DEFAULT_AGENT_PLACEHOLDER = (
-    "Replace this scaffold with a real challenger agent implementation before opening a PR."
-)
-SUBMISSION_ID_CONVENTION = "<github-username>-YYYYMMDD-NN"
-PR_ACTION_CLOSE_INVALID = "close-invalid"
-PR_ACTION_EVALUATE = "evaluate"
-PR_ACTION_CLOSE_LOSING = "close-losing"
-PR_ACTION_RERUN_STALE = "rerun-stale"
-PR_ACTION_MERGE = "merge"
 SN60_PROJECT_SAMPLE_SIZE_ENV = "KATA_SN60_PROJECT_SAMPLE_SIZE"
 SN60_PROJECT_SAMPLE_SECRET_ENV = "KATA_SN60_PROJECT_SAMPLE_SECRET"
-
-
-@dataclass(frozen=True)
-class SubmissionMetadata:
-    schema_version: int
-    repo_pack: str
-    mode: str
-    submission_id: str
-    created_at: str
-    author: str | None = None
-    title: str | None = None
-    notes: str | None = None
-
-
-@dataclass(frozen=True)
-class SubmissionDescriptor:
-    root: Path
-    repo_pack: str
-    mode: str
-    submission_id: str
-    agent_path: Path
-    agent_manifest_path: Path
-    metadata_path: Path
-
-
-@dataclass(frozen=True)
-class SubmissionValidationResult:
-    submission_path: str
-    repo_pack: str | None
-    mode: str | None
-    submission_id: str | None
-    agent_path: str | None
-    metadata_path: str | None
-    changed_paths: list[str]
-    off_scope_paths: list[str]
-    reasons: list[str]
-    metadata: SubmissionMetadata | None
-    evaluator_id: str | None = None
-    screening_status: str | None = None
-    screening_review_reasons: list[str] = field(default_factory=list)
-    screening_notes: list[str] = field(default_factory=list)
-    screening_score: int = 0
-
-    @property
-    def is_valid(self) -> bool:
-        return not self.reasons and not self.off_scope_paths
-
-
-@dataclass(frozen=True)
-class SubmissionCandidateValidation:
-    reasons: list[str] = field(default_factory=list)
-    screening_status: str | None = None
-    screening_review_reasons: list[str] = field(default_factory=list)
-    screening_notes: list[str] = field(default_factory=list)
-    screening_score: int = 0
-
-
-@dataclass(frozen=True)
-class SubmissionVerificationResult:
-    submission_path: str
-    challenge_summary_path: str
-    repo_pack: str
-    mode: str
-    submission_id: str
-    candidate_artifact_hash: str
-    recorded_candidate_artifact_hash: str
-    current_king_artifact_hash: str
-    recorded_king_artifact_hash: str
-    current_validator_model: str
-    recorded_validator_model: str
-    submission_matches_challenge: bool
-    king_is_current: bool
-    benchmark_is_current: bool
-    promotion_ready: bool
-    auto_merge_ready: bool
-    reasons: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class PullRequestInspectionResult:
-    action: str
-    submission_path: str | None
-    repo_pack: str | None
-    mode: str | None
-    submission_id: str | None
-    changed_paths: list[str]
-    reasons: list[str]
-    candidate_submission_dirs: list[str]
-
-
-@dataclass(frozen=True)
-class SubmissionDecisionResult:
-    action: str
-    submission_path: str
-    challenge_summary_path: str
-    repo_pack: str
-    mode: str
-    submission_id: str
-    reason: str
-    reasons: list[str]
-    promotion_ready: bool
-    auto_merge_ready: bool
 
 
 def init_submission(
@@ -198,9 +106,7 @@ def init_submission(
         raise ValueError("; ".join(lane_reasons))
     effective_author = author.strip() if author and author.strip() else None
     root_base = (
-        Path(output_root).expanduser().resolve()
-        if output_root
-        else default_submissions_root()
+        Path(output_root).expanduser().resolve() if output_root else default_submissions_root()
     )
     submission_root = root_base / repo_pack / mode / submission_id
     submission_root.mkdir(parents=True, exist_ok=False)
@@ -258,9 +164,7 @@ def validate_submission(
 
     symlink_paths = find_bundle_symlink_paths(descriptor.root)
     if symlink_paths:
-        reasons.append(
-            "Submission bundle must not contain symlinks: " + ", ".join(symlink_paths)
-        )
+        reasons.append("Submission bundle must not contain symlinks: " + ", ".join(symlink_paths))
         return SubmissionValidationResult(
             submission_path=str(descriptor.root),
             repo_pack=descriptor.repo_pack,
@@ -309,9 +213,7 @@ def validate_submission(
 
     if metadata is not None:
         reasons.extend(validate_submission_metadata(metadata, descriptor))
-        reasons.extend(
-            validate_submission_target(metadata, public_root=public_root)
-        )
+        reasons.extend(validate_submission_target(metadata, public_root=public_root))
         if agent_path.exists():
             candidate_validation = validate_submission_candidate(
                 metadata=metadata,
@@ -353,11 +255,7 @@ def evaluate_submission(
     sn60_sandbox_commit: str | None = None,
 ) -> ChallengeSummary:
     validation = validate_submission(submission_path)
-    if (
-        not validation.is_valid
-        or validation.metadata is None
-        or validation.agent_path is None
-    ):
+    if not validation.is_valid or validation.metadata is None or validation.agent_path is None:
         raise ValueError(
             "Submission is invalid. Run `kata submission validate` first. "
             + "; ".join(validation.reasons or ["unknown validation failure"])
@@ -408,9 +306,7 @@ def parse_sn60_project_sample_size_from_env() -> int | None:
     try:
         sample_size = int(value.strip())
     except ValueError as exc:
-        raise ValueError(
-            f"{SN60_PROJECT_SAMPLE_SIZE_ENV} must be a positive integer."
-        ) from exc
+        raise ValueError(f"{SN60_PROJECT_SAMPLE_SIZE_ENV} must be a positive integer.") from exc
     if sample_size <= 0:
         raise ValueError(f"{SN60_PROJECT_SAMPLE_SIZE_ENV} must be greater than 0.")
     return sample_size
@@ -504,9 +400,7 @@ def resolve_sn60_lane_king_hash(
         king = load_lane_king_state(lane_id, public_root=public_root)
         if king.current_king_artifact_hash:
             return king.current_king_artifact_hash
-    king_root = resolve_public_king_root(
-        public_root=public_root, repo_pack=repo_pack, mode=mode
-    )
+    king_root = resolve_public_king_root(public_root=public_root, repo_pack=repo_pack, mode=mode)
     if (king_root / SUBMISSION_AGENT_FILENAME).exists():
         return hash_submission_bundle(king_root)
     return None
@@ -542,8 +436,7 @@ def resolve_sn60_king_artifact(metadata: SubmissionMetadata) -> tuple[str, str]:
     entry = find_evaluator_pack_entry(metadata.repo_pack, metadata.mode)
     if entry is None:
         raise ValueError(
-            "No evaluator-backed lane is registered for "
-            f"`{metadata.repo_pack}/{metadata.mode}`."
+            f"No evaluator-backed lane is registered for `{metadata.repo_pack}/{metadata.mode}`."
         )
     king_root = resolve_public_king_root(
         public_root=None,
@@ -657,11 +550,7 @@ def verify_submission_result(
     public_root: str | None = None,
 ) -> SubmissionVerificationResult:
     validation = validate_submission(submission_path, public_root=public_root)
-    if (
-        not validation.is_valid
-        or validation.metadata is None
-        or validation.agent_path is None
-    ):
+    if not validation.is_valid or validation.metadata is None or validation.agent_path is None:
         raise ValueError(
             "Submission is invalid. Run `kata submission validate` first. "
             + "; ".join(validation.reasons or ["unknown validation failure"])
@@ -771,9 +660,7 @@ def decide_submission_action(
         )
 
     stale_reasons = [
-        reason
-        for reason in verification.reasons
-        if "stale" in reason or "does not match" in reason
+        reason for reason in verification.reasons if "stale" in reason or "does not match" in reason
     ]
     if stale_reasons:
         return SubmissionDecisionResult(
@@ -821,10 +708,7 @@ def promote_submission_result(
     if not verification.auto_merge_ready:
         raise ValueError(
             "Submission is not safe to promote. "
-            + "; ".join(
-                verification.reasons
-                or ["submission result is not auto-merge ready"]
-            )
+            + "; ".join(verification.reasons or ["submission result is not auto-merge ready"])
         )
     summary = load_challenge_summary(challenge_summary_path)
     evaluator_entry = find_evaluator_pack_entry(
@@ -942,8 +826,7 @@ def render_submission_verification(result: SubmissionVerificationResult) -> str:
     lines.append(f"Mode: {result.mode}")
     lines.append(f"Submission id: {result.submission_id}")
     lines.append(
-        "Submission matches challenge: "
-        + ("yes" if result.submission_matches_challenge else "no")
+        "Submission matches challenge: " + ("yes" if result.submission_matches_challenge else "no")
     )
     lines.append(f"King is current: {'yes' if result.king_is_current else 'no'}")
     lines.append(f"Benchmark lane is current: {'yes' if result.benchmark_is_current else 'no'}")
@@ -987,138 +870,12 @@ def render_submission_json(
     return json.dumps(payload, indent=2) + "\n"
 
 
-@dataclass(frozen=True)
-class ChangedPathValidation:
-    off_scope_paths: list[str]
-    reasons: list[str]
-
-
-def validate_changed_paths(
-    descriptor: SubmissionDescriptor,
-    changed_paths: list[str],
-) -> ChangedPathValidation:
-    expected_prefix = (
-        Path(SUBMISSIONS_DIRNAME)
-        / descriptor.repo_pack
-        / descriptor.mode
-        / descriptor.submission_id
-    ).as_posix() + "/"
-    off_scope_paths: list[str] = []
-    reasons: list[str] = []
-    touched_bundle_file = False
-
-    for changed_path in changed_paths:
-        normalized = changed_path.strip("/")
-        if not normalized.startswith(expected_prefix):
-            off_scope_paths.append(normalized)
-            continue
-        relative_name = normalized.removeprefix(expected_prefix)
-        if (
-            "/" not in relative_name
-            and relative_name in TOP_LEVEL_SUBMISSION_FILENAMES
-        ) or is_allowed_bundle_relative_path(relative_name):
-            if is_allowed_bundle_relative_path(relative_name):
-                touched_bundle_file = True
-            continue
-        else:
-            off_scope_paths.append(normalized)
-
-    if off_scope_paths:
-        reasons.append("Submission PR touches paths outside the allowed submission scope.")
-    if not touched_bundle_file:
-        reasons.append("Submission PR must modify at least one agent bundle file.")
-
-    return ChangedPathValidation(
-        off_scope_paths=off_scope_paths,
-        reasons=reasons,
-    )
-
-
-def validate_submission_metadata(
-    metadata: SubmissionMetadata,
-    descriptor: SubmissionDescriptor,
-) -> list[str]:
-    reasons: list[str] = []
-    if metadata.schema_version != SUBMISSION_SCHEMA_VERSION:
-        reasons.append(
-            "Unsupported submission schema version: "
-            f"{metadata.schema_version}. Expected {SUBMISSION_SCHEMA_VERSION}."
-        )
-    if metadata.repo_pack != descriptor.repo_pack:
-        reasons.append(
-            "submission.json subnet_pack does not match the submission path."
-        )
-    if metadata.mode != descriptor.mode:
-        reasons.append("submission.json mode does not match the submission path.")
-    if metadata.submission_id != descriptor.submission_id:
-        reasons.append(
-            "submission.json submission_id does not match the submission path."
-        )
-    return reasons
-
-
 def validate_submission_target(
     metadata: SubmissionMetadata,
     *,
     public_root: str | None = None,
 ) -> list[str]:
-    return validate_submission_lane(
-        metadata.repo_pack, metadata.mode, public_root=public_root
-    )
-
-
-def validate_submission_candidate(
-    *,
-    metadata: SubmissionMetadata,
-    submission_root: Path,
-    public_root: str | None = None,
-) -> SubmissionCandidateValidation:
-    screening_status: str | None = None
-    screening_review_reasons: list[str] = []
-    screening_notes: list[str] = []
-    screening_score = 0
-    if metadata.mode == "miner":
-        screening_decision = screen_submission(
-            submission_root=submission_root,
-            changed_paths=[],
-            repo_root=submission_root,
-            public_root=Path(public_root).expanduser().resolve() if public_root else None,
-            mode=metadata.mode,
-            repo_pack=metadata.repo_pack,
-        )
-        screening_status = screening_decision.status
-        screening_review_reasons = [
-            render_screening_finding(finding)
-            for finding in screening_decision.review_reasons
-        ]
-        screening_notes = [
-            render_screening_finding(finding) for finding in screening_decision.notes
-        ]
-        screening_score = screening_decision.score
-        reasons = screening_decision.rejection_messages()
-    else:
-        bundle_files = load_bundle_files(submission_root)
-        reasons = [
-            *validate_bundle_python_sources(bundle_files),
-            *validate_bundle_static_policy(bundle_files),
-        ]
-    return SubmissionCandidateValidation(
-        reasons=dedupe(reasons),
-        screening_status=screening_status,
-        screening_review_reasons=dedupe(screening_review_reasons),
-        screening_notes=dedupe(screening_notes),
-        screening_score=screening_score,
-    )
-
-
-def render_screening_finding(finding: ScreeningFinding) -> str:
-    location = ""
-    if finding.path:
-        location = finding.path
-        if finding.line is not None:
-            location += f":{finding.line}"
-        location += ": "
-    return f"{location}{finding.reason}"
+    return validate_submission_lane(metadata.repo_pack, metadata.mode, public_root=public_root)
 
 
 def find_evaluator_pack_entry(
@@ -1147,180 +904,8 @@ def validate_submission_lane(
     entry = find_evaluator_pack_entry(repo_pack, mode, public_root=public_root)
     if entry is None:
         return [
-            "No evaluator-backed lane is registered in the pack registry for "
-            f"`{repo_pack}/{mode}`."
+            f"No evaluator-backed lane is registered in the pack registry for `{repo_pack}/{mode}`."
         ]
     if not entry.active:
-        return [
-            "Evaluator-backed lane is not active in the pack registry: "
-            f"{entry.lane_id}"
-        ]
+        return [f"Evaluator-backed lane is not active in the pack registry: {entry.lane_id}"]
     return []
-
-
-def resolve_submission_descriptor(
-    submission_root: Path,
-    *,
-    repo_root: Path | None,
-    require_exists: bool = True,
-) -> tuple[SubmissionDescriptor | None, list[str]]:
-    reasons: list[str] = []
-    root = submission_root.resolve()
-    if require_exists:
-        if not root.exists():
-            return None, [f"Submission path does not exist: {submission_root}"]
-        if not root.is_dir():
-            return None, [f"Submission path must be a directory: {submission_root}"]
-
-    if repo_root is not None:
-        try:
-            relative = root.relative_to(repo_root)
-        except ValueError:
-            return None, ["Submission path must live under the Kata repo root."]
-        parts = relative.parts
-    else:
-        parts = root.parts
-        if SUBMISSIONS_DIRNAME in parts:
-            parts = parts[parts.index(SUBMISSIONS_DIRNAME) :]
-
-    if len(parts) < 4 or parts[0] != SUBMISSIONS_DIRNAME:
-        reasons.append(
-            "Submission path must match "
-            "`submissions/<subnet-pack>/<mode>/<submission-id>`."
-        )
-        return None, reasons
-
-    repo_pack = parts[1]
-    mode = parts[2]
-    submission_id = parts[3]
-    if mode not in SUPPORTED_SUBMISSION_MODES:
-        reasons.append(
-            "Submission mode must be one of: "
-            + ", ".join(sorted(SUPPORTED_SUBMISSION_MODES))
-        )
-    return (
-        SubmissionDescriptor(
-            root=root,
-            repo_pack=repo_pack,
-            mode=mode,
-            submission_id=submission_id,
-            agent_path=root / SUBMISSION_AGENT_FILENAME,
-            agent_manifest_path=root / SUBMISSION_AGENT_MANIFEST_FILENAME,
-            metadata_path=root / SUBMISSION_METADATA_FILENAME,
-        ),
-        reasons,
-    )
-
-
-def load_submission_metadata(path: Path) -> SubmissionMetadata:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"Submission metadata must contain a JSON object: {path}")
-    try:
-        return SubmissionMetadata(
-            schema_version=int(payload["schema_version"]),
-            repo_pack=read_submission_subnet_pack(payload),
-            mode=str(payload["mode"]),
-            submission_id=str(payload["submission_id"]),
-            created_at=str(payload["created_at"]),
-            author=str(payload["author"]) if payload.get("author") is not None else None,
-            title=str(payload["title"]) if payload.get("title") is not None else None,
-            notes=str(payload["notes"]) if payload.get("notes") is not None else None,
-        )
-    except KeyError as exc:
-        raise ValueError(
-            f"Submission metadata is missing required field: {exc.args[0]}"
-        ) from exc
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Submission metadata has an invalid field: {exc}") from exc
-
-
-def read_submission_subnet_pack(payload: dict[str, object]) -> str:
-    value = payload.get("subnet_pack", payload.get("repo_pack"))
-    if value is None:
-        raise KeyError("subnet_pack")
-    return str(value)
-
-
-def write_submission_metadata(path: Path, metadata: SubmissionMetadata) -> None:
-    payload = asdict(metadata)
-    payload["subnet_pack"] = payload.pop("repo_pack")
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-
-
-def validate_submission_mode(mode: str) -> None:
-    if mode not in SUPPORTED_SUBMISSION_MODES:
-        raise ValueError(
-            "Submission mode must be one of: "
-            + ", ".join(sorted(SUPPORTED_SUBMISSION_MODES))
-        )
-
-
-def default_submissions_root() -> Path:
-    return Path.cwd().resolve() / SUBMISSIONS_DIRNAME
-
-
-def default_submission_agent() -> str:
-    return (
-        "from __future__ import annotations\n\n"
-        '\"\"\"Kata submission scaffold for the miner lane.\"\"\"\n\n'
-        "def agent_main(\n"
-        "    project_dir: str | None = None,\n"
-        "    inference_api: str | None = None,\n"
-        ") -> dict:\n"
-        f"    # {DEFAULT_AGENT_PLACEHOLDER}\n"
-        "    return {\n"
-        "        \"vulnerabilities\": [],\n"
-        "    }\n"
-    )
-
-
-def default_submission_notes() -> str:
-    lines = [
-        "Recommended conventions:",
-        "- author: your GitHub username",
-        f"- submission_id: {SUBMISSION_ID_CONVENTION}",
-        "- implement a real agent in agent.py before opening the PR",
-        "- SN60 miner submissions in V1 must stay self-contained in agent.py",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def required_submission_entrypoint_reason() -> str:
-    return "Submission agent must define agent_main(...)."
-
-
-def agent_defines_required_entrypoint(agent_source: str) -> bool:
-    pattern = re.compile(r"(?m)^(?:async\s+)?def\s+agent_main\s*\(")
-    return pattern.search(agent_source) is not None
-
-
-def infer_submission_dirs(changed_paths: list[str]) -> list[str]:
-    candidate_dirs: list[str] = []
-    for changed_path in changed_paths:
-        parts = Path(changed_path).parts
-        if len(parts) < 5 or parts[0] != SUBMISSIONS_DIRNAME:
-            continue
-        candidate_dir = Path(*parts[:4]).as_posix()
-        if candidate_dir not in candidate_dirs:
-            candidate_dirs.append(candidate_dir)
-    return candidate_dirs
-
-
-def read_changed_paths_file(path: str) -> list[str]:
-    file_path = Path(path).expanduser().resolve()
-    return [
-        line.strip()
-        for line in file_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def normalize_changed_paths(changed_paths: list[str]) -> list[str]:
-    normalized: list[str] = []
-    for changed_path in changed_paths:
-        value = changed_path.strip()
-        if not value:
-            continue
-        normalized.append(value.strip("/"))
-    return normalized
