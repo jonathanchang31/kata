@@ -40,6 +40,7 @@ from kata.validator_system import (
     project_pass_threshold_label,
     render_challenge_summary,
     resolve_sn60_project_keys,
+    run_sn60_baseline_only,
     run_sn60_round,
     sn60_pass_score,
 )
@@ -401,14 +402,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     round_cmd.add_argument(
-        "--king-skipped-reason",
-        default=None,
-        help=(
-            "Optional explanation recorded when --candidate-only skips current "
-            "king evaluation."
-        ),
-    )
-    round_cmd.add_argument(
         "--output-root",
         default=None,
         help="Optional base directory for round artifacts. Defaults to ./runs.",
@@ -428,6 +421,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit machine-readable JSON instead of text.",
     )
     round_cmd.set_defaults(handler=handle_round)
+
+    baseline_cmd = subparsers.add_parser(
+        "sn60-baseline",
+        help="Score one proof-only SN60 baseline artifact without evaluating the Kata king.",
+    )
+    baseline_cmd.add_argument(
+        "--candidate",
+        required=True,
+        metavar="ID=PATH",
+        help="The baseline artifact as '<submission-id>=<artifact-path>'.",
+    )
+    baseline_cmd.add_argument(
+        "--sn60-project-key",
+        action="append",
+        required=True,
+        help="SN60 project key to score the baseline on. Repeat per project.",
+    )
+    baseline_cmd.add_argument(
+        "--output-root",
+        default=None,
+        help="Optional base directory for baseline artifacts. Defaults to ./runs.",
+    )
+    baseline_cmd.add_argument("--sn60-replicas-per-project", type=int, default=None)
+    baseline_cmd.add_argument("--sn60-sandbox-root", default=None)
+    baseline_cmd.add_argument("--sn60-benchmark-file", default=None)
+    baseline_cmd.add_argument("--sn60-sandbox-commit", default=None)
+    baseline_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON instead of text.",
+    )
+    baseline_cmd.set_defaults(handler=handle_sn60_baseline)
 
     return parser
 
@@ -561,7 +586,6 @@ def handle_round(args: argparse.Namespace) -> int:
         king_scoreboard_path=args.king_scoreboard,
         progress_path=args.round_progress_path,
         candidate_only=args.candidate_only,
-        king_skipped_reason=args.king_skipped_reason,
     )
     runs_per_project = getattr(
         result,
@@ -599,6 +623,59 @@ def handle_round(args: argparse.Namespace) -> int:
         )
     else:
         print(render_round_result(result))
+    return 0
+
+
+def handle_sn60_baseline(args: argparse.Namespace) -> int:
+    submission_id, artifact_path = parse_round_candidate(args.candidate)
+    result = run_sn60_baseline_only(
+        submission_id=submission_id,
+        artifact_path=artifact_path,
+        project_keys=args.sn60_project_key,
+        output_root=args.output_root,
+        replicas_per_project=args.sn60_replicas_per_project or DEFAULT_REPLICAS_PER_PROJECT,
+        sandbox_root=args.sn60_sandbox_root,
+        benchmark_file=args.sn60_benchmark_file,
+        sandbox_commit=args.sn60_sandbox_commit,
+    )
+    runs_per_project = getattr(
+        result,
+        "replicas_per_project",
+        args.sn60_replicas_per_project or DEFAULT_REPLICAS_PER_PROJECT,
+    )
+    if args.json:
+        print_json(
+            {
+                "run_id": result.run_id,
+                "baseline_summary_path": str(
+                    (Path(result.output_root) / "baseline_summary.json").resolve()
+                ),
+                "competition_mode": result.competition_mode,
+                "validator_replica_count": 1,
+                "runs_per_project": runs_per_project,
+                "project_pass_threshold": project_pass_threshold_label(runs_per_project),
+                "project_keys": result.project_keys,
+                "replicas_per_project": result.replicas_per_project,
+                "sandbox_source": {
+                    "sandbox_root": result.sandbox_source.sandbox_root,
+                    "benchmark_file": result.sandbox_source.benchmark_file,
+                    "benchmark_sha256": result.sandbox_source.benchmark_sha256,
+                    "sandbox_commit": result.sandbox_source.sandbox_commit,
+                    "scorer_version": result.sandbox_source.scorer_version,
+                },
+                "entries": [
+                    {
+                        "submission_id": result.submission_id,
+                        "beats_king": None,
+                        "selected_winner": False,
+                        "duel_run_id": result.run_id,
+                        **_sn60_variant_detail(result.baseline),
+                    }
+                ],
+            }
+        )
+    else:
+        print(render_sn60_baseline_result(result))
     return 0
 
 
@@ -666,6 +743,22 @@ def render_round_result(result) -> str:  # type: ignore[no-untyped-def]
             f"tp {entry.candidate.true_positives}) {marker}"
         )
     lines.append(result.promotion_reason)
+    return "\n".join(lines)
+
+
+def render_sn60_baseline_result(result) -> str:  # type: ignore[no-untyped-def]
+    lines = [
+        f"SN60 baseline replay {result.run_id}",
+        "mode: baseline-only proof replay",
+        "kata king evaluated: no",
+        (
+            f"baseline pass score {sn60_pass_score(result.baseline):.3f} "
+            f"({result.baseline.codebase_pass_count}/"
+            f"{len(result.baseline.project_summaries)} projects, "
+            f"detection {result.baseline.aggregated_score:.3f}, "
+            f"tp {result.baseline.true_positives}/{result.baseline.total_expected})"
+        ),
+    ]
     return "\n".join(lines)
 
 

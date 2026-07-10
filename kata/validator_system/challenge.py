@@ -731,12 +731,42 @@ class Sn60RoundResult:
     king_skipped_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class Sn60BaselineResult:
+    schema_version: int
+    run_id: str
+    created_at: str
+    output_root: str
+    project_keys: list[str]
+    replicas_per_project: int
+    sandbox_source: Sn60SandboxSource
+    submission_id: str
+    artifact_path: str
+    artifact_hash: str
+    baseline: Sn60VariantSummary
+    competition_mode: str = "baseline_only"
+
+
 def build_sn60_round_id() -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"sn60-round-{timestamp}-{secrets.token_hex(3)}"
 
 
 def write_sn60_round_summary(path: Path, result: Sn60RoundResult) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = asdict(result)
+    payload["validator_replica_count"] = 1
+    payload["runs_per_project"] = result.replicas_per_project
+    payload["project_pass_threshold"] = project_pass_threshold_label(
+        result.replicas_per_project
+    )
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_sn60_baseline_summary(path: Path, result: Sn60BaselineResult) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(result)
     payload["validator_replica_count"] = 1
@@ -1384,6 +1414,82 @@ def run_sn60_candidate_only_round(
     progress["winner_submission_id"] = result.winner_submission_id
     emit_progress()
     write_sn60_round_summary(round_root / "round_summary.json", result)
+    return result
+
+
+def run_sn60_baseline_only(
+    *,
+    submission_id: str,
+    artifact_path: str,
+    project_keys: list[str],
+    output_root: str | None = None,
+    replicas_per_project: int = DEFAULT_REPLICAS_PER_PROJECT,
+    sandbox_root: str | None = None,
+    benchmark_file: str | None = None,
+    sandbox_commit: str | None = None,
+    execution_hook: Sn60ExecutionHook | None = None,
+    evaluation_hook: Sn60EvaluationHook | None = None,
+) -> Sn60BaselineResult:
+    """Score one proof-only external baseline without evaluating any Kata king.
+
+    This is intentionally not a competition round. It exists so operators can
+    compare a public SN60 agent against a saved Kata round result without spending
+    tokens re-running the already-scored Kata king/winner.
+    """
+    if not project_keys:
+        raise ValueError("SN60 baseline replay requires at least one project key.")
+    if replicas_per_project <= 0:
+        raise ValueError("SN60 baseline replay replicas_per_project must be positive.")
+
+    source = resolve_sn60_sandbox_source(
+        sandbox_root=sandbox_root,
+        benchmark_file=benchmark_file,
+        sandbox_commit=sandbox_commit,
+        scorer_version="ScaBenchScorerV2",
+    )
+    validate_sn60_project_keys(project_keys, sandbox_source=source)
+    baseline_root = Path(artifact_path).expanduser().resolve()
+    baseline_hash = hash_bundle_root(baseline_root)
+    output_base = (
+        Path(output_root).expanduser().resolve() if output_root else Path("runs").resolve()
+    )
+    run_id = build_sn60_round_id()
+    run_root = output_base / run_id
+    run_root.mkdir(parents=True, exist_ok=False)
+
+    results = score_variant_on_projects(
+        run_id=run_id,
+        run_root=run_root,
+        variant_name="baseline",
+        artifact_root=baseline_root,
+        project_keys=project_keys,
+        replicas_per_project=replicas_per_project,
+        sandbox_source=source,
+        execution_hook=execution_hook or build_default_execution_hook(source),
+        evaluation_hook=evaluation_hook or build_default_evaluation_hook(source),
+        eval_max_vulns=DEFAULT_EVAL_MAX_VULNS,
+        progress_callback=None,
+    )
+    baseline_summary = summarize_variant(
+        variant_name="baseline",
+        artifact_root=baseline_root,
+        artifact_hash=baseline_hash,
+        replica_results=results,
+    )
+    result = Sn60BaselineResult(
+        schema_version=DEFAULT_SN60_ROUND_SCHEMA_VERSION,
+        run_id=run_id,
+        created_at=datetime.now(UTC).isoformat(),
+        output_root=str(run_root),
+        project_keys=list(project_keys),
+        replicas_per_project=replicas_per_project,
+        sandbox_source=source,
+        submission_id=submission_id,
+        artifact_path=str(baseline_root),
+        artifact_hash=baseline_hash,
+        baseline=baseline_summary,
+    )
+    write_sn60_baseline_summary(run_root / "baseline_summary.json", result)
     return result
 
 
